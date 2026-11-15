@@ -1,0 +1,29 @@
+{
+  "version": "0.1.0",
+  "protocol": 1,
+  "mavenCoordinate": "io.github.gkobakhidze:e2e-studio-sdk:0.1.0",
+  "androidSourceSha256": "deccdb43643c3130d23a65e87c414890bdec544a44a04983447ba71ad9dd1938",
+  "files": {
+    ".gitignore": "cc4a200bd94d33c60aa83d0fc0e47bb4c833e0fa912206bf9824c87f67c2517d",
+    "Package.swift": "4b1fa73e23410f13f61efb708c0b504b2f1d3485ed3810292a08e09a35640cb9",
+    "README.md": "2cb95d1e26e8f66dd36a42fd251363819b7555995ca8fc97644b6cbd492e6c36",
+    "Sources/E2EStudioSDK/E2EStudioSDK.swift": "b729c8ac53e518897829b758c6fa39a0935abf72cd5e14b3be3214262857a161",
+    "VERSION": "e9dd8507f4bf0c6f42458e41aea833ad0bd3f6127272335eee9bf4d58541ed67",
+    "android/AndroidManifest.xml": "6c7f856c5faef07a55c6597d65aaf45312346970fb5674e2d9756db12563246a",
+    "android/build.sh": "c3058801dd41cc992a16710dfd964cb8f1f686c920dae3b8054797627a9f1d25",
+    "android/src/dev/e2estudio/sdk/E2EStudioSdk.java": "299502e978c9d1c84a7b3d629620eaecdcc9ebd5d27223358f872a6fae245fad",
+    "android/src/dev/e2estudio/sdk/SdkProvider.java": "bfe04ff19fa69c32bbc170e8fe73c07678e4c08e4485cd45c4da6aa3912d3245",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0-sources.jar": "171ee5e3883987b14714808b131784f7490180d9e9cec43718abac1e98c6bbeb",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0-sources.jar.sha1": "c29f067255bf48321c48b9f9950e531aa15854df59133669086c364e394dd868",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0-sources.jar.sha256": "9680def292ea2a2e936ffbf9a35e632a6ac4c98bdf79e0110f0cb1387d6607e8",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0-sources.jar.sha512": "9aaff92b947b66f80f678bea5e83adc80eeb79470410ccf0b35c306216d34edb",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0.aar": "31102cd1afea0a6f075221a8da1bc304faa8fd1d353c3f159b22632e8ece7d91",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0.aar.sha1": "a9d22a894df106aef2bdbd7a58276f27b77a990626a25ba5e41c0599e87d0753",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0.aar.sha256": "18fe057921ee0b6791495ae137860210bf0fd061618d988b6323b2f6a99aa8b1",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0.aar.sha512": "05497a53a3bd2bddb502a8f97d2ac28000fd35b17773b1a2f28e97b8b2108eb6",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0.pom": "0fbfdbb078b4aed40057d721c905926765b6e58f284041b2973f3500b1a6db3a",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0.pom.sha1": "b9a9c23a08f9b22cbdf8050a0f665637838ca6ea8478bd486df42bf9da0be5ac",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0.pom.sha256": "9696d3fd0644e5e22c88cedc7844549b1008131bfc22354505ecea4ad21c8bf4",
+    "maven/io/github/gkobakhidze/e2e-studio-sdk/0.1.0/e2e-studio-sdk-0.1.0.pom.sha512": "7a98cdb4711506f81ec951a306749919a446621cbf9a15a28e1b6b81c2a0172f"
+  }
+}

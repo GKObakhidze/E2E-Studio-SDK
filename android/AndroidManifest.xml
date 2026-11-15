@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.e2estudio.sdk">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application>
+        <provider android:name="dev.e2estudio.sdk.SdkProvider" android:authorities="${applicationId}.e2estudio.sdk" android:exported="false" android:initOrder="100" />
+    </application>
+</manifest>
