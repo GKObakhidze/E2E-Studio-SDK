@@ -145,7 +145,7 @@ private final class SDKServer {
         let ready = UIApplication.shared.applicationState == .active && !views.isEmpty
         if method == "GET" && path == "/status" {
             let supported = !views.isEmpty && !views.contains(where: hasUnsupportedUI)
-            return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.1.0","platform":"ios",
+            return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.2.0","platform":"ios",
                     "appId":Bundle.main.bundleIdentifier ?? "", "ready":ready,
                     "capabilities":supported ? ["hierarchy","type","clear","keyboard-hide"] : []] as [String:Any]
         }

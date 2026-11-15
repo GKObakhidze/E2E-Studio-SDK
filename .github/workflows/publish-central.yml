@@ -1,0 +1,36 @@
+name: Publish Android SDK to Maven Central
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish after successful validation (false validates only)
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: sdk-central-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Sign, verify and upload SDK payload
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          if [ "$PUBLISH" = "true" ]; then
+            python3 tools/publish-central.py --output "$RUNNER_TEMP/sdk-central.zip" --publish
+          else
+            python3 tools/publish-central.py --output "$RUNNER_TEMP/sdk-central.zip" --upload
+          fi
