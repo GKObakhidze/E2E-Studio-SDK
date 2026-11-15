@@ -1,0 +1,57 @@
+// E2E Studio SDK 0.2.0 — MIT. Apply once in an Android application module.
+// Adds a Debug-only dependency; never changes application source or repository settings.
+import java.nio.channels.FileChannel
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
+import java.security.MessageDigest
+
+final String sdkVersion = '0.2.0'
+final String sdkHash = '5c5a08bb5ccee31d0e52b0dbf80616abe4b668281f5429e54f79ec92c48acfc5'
+final String sdkUrl = 'https://raw.githubusercontent.com/GKObakhidze/E2E-Studio-SDK/v0.2.0/maven/io/github/gkobakhidze/e2e-studio-sdk/0.2.0/e2e-studio-sdk-0.2.0.aar'
+final String marker = 'dev.e2estudio.sdk.configuredVersion'
+if (project.extensions.extraProperties.has(marker)) {
+    if (project.extensions.extraProperties.get(marker) != sdkVersion)
+        throw new GradleException('Different E2E Studio SDK versions were applied to the same module')
+    return
+}
+project.extensions.extraProperties.set(marker, sdkVersion)
+
+def configureSdk = {
+    def folder = new File(project.gradle.gradleUserHomeDir, "caches/e2e-studio-sdk/${sdkVersion}")
+    if (!folder.mkdirs() && !folder.isDirectory()) throw new GradleException('Cannot create the E2E Studio SDK cache')
+    def archive = new File(folder, "e2e-studio-sdk-${sdkVersion}-${sdkHash.take(12)}.aar")
+    def checksum = { file ->
+        def digest = MessageDigest.getInstance('SHA-256')
+        file.withInputStream { input ->
+            byte[] buffer = new byte[16384]
+            int count
+            while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+        }
+        digest.digest().encodeHex().toString()
+    }
+    def lockPath = new File(folder, '.download.lock').toPath()
+    FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE).withCloseable { channel ->
+        channel.lock().withCloseable {
+            if (!archive.isFile() || checksum(archive) != sdkHash) {
+                if (project.gradle.startParameter.offline)
+                    throw new GradleException('E2E Studio SDK is not cached or its checksum differs. Build once online, then retry offline.')
+                def temporary = Files.createTempFile(folder.toPath(), '.download-', '.aar')
+                try {
+                    def connection = new URL(sdkUrl).openConnection()
+                    connection.connectTimeout = 15000
+                    connection.readTimeout = 30000
+                    connection.getInputStream().withCloseable { input -> Files.copy(input, temporary, StandardCopyOption.REPLACE_EXISTING) }
+                    if (checksum(temporary.toFile()) != sdkHash) throw new GradleException('E2E Studio SDK checksum verification failed')
+                    Files.move(temporary, archive.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                } finally { Files.deleteIfExists(temporary) }
+            }
+        }
+    }
+    project.dependencies.add('debugImplementation', project.files(archive))
+}
+project.pluginManager.withPlugin('com.android.application') { configureSdk() }
+project.afterEvaluate {
+    if (!project.plugins.hasPlugin('com.android.application'))
+        throw new GradleException('Apply E2E Studio SDK in an Android application module, after the Android plugin')
+}

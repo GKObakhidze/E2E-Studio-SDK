@@ -2,17 +2,25 @@
 
 SDK integration for debug/test applications. Android and iOS share this public repository, version and protocol. Licensed under MIT.
 
-## Android — one dependency
+## Android — one setup line
 
-In the app module's `build.gradle.kts`:
+Add this line after `plugins { ... }` in the app module's `build.gradle.kts`:
 
 ```kotlin
-debugImplementation("io.github.gkobakhidze:e2e-studio-sdk:0.2.0")
+apply(from = "https://raw.githubusercontent.com/GKObakhidze/E2E-Studio-SDK/v0.2.0/android/e2e-studio-sdk.gradle")
 ```
 
-Standard Android projects already use `mavenCentral()`. If your project uses a custom repository configuration, include Maven Central in its dependency repositories. No Gradle plugin, GitHub credential, Application hook or Activity change is required. Custom QA build types can use the corresponding dependency configuration instead of Debug.
+For Groovy `build.gradle`, the equivalent is:
 
-Build and install Debug, then launch it through E2E Studio. The manifest provider activates the SDK automatically, only in a debuggable application with Studio's session arguments.
+```groovy
+apply from: "https://raw.githubusercontent.com/GKObakhidze/E2E-Studio-SDK/v0.2.0/android/e2e-studio-sdk.gradle"
+```
+
+Build and install Debug, then launch it through E2E Studio. This Gradle script plugin adds the SDK only to `debugImplementation`. The Android manifest provider starts it automatically in a debuggable application with Studio's session arguments. No Application/Activity edits, repository blocks, publishing accounts, tokens or global Gradle configuration are required.
+
+The plugin downloads this repository's versioned AAR to Gradle's cache, verifies its pinned SHA-256 and reuses it for subsequent/offline builds. The initial script/SDK download needs network access. Your other application dependencies have their normal build requirements. Product flavors inheriting the Debug build type use the same dependency. Apply the setup in an Android **application** module, not the root project or a library module.
+
+The release artefacts are hosted in this public Git repository. No Maven Central, GitHub Packages or paid registry is required. This repository also retains a Maven-layout copy for teams that prefer their own repository configuration.
 
 ## iOS — add the Swift package
 
@@ -32,16 +40,12 @@ Supported SDK operations: native Android Views/UIKit hierarchy and input; Androi
 
 Listeners bind loopback and require a per-session credential. A normal launch without the session environment opens no SDK listener. Use SDK-enabled builds for development/QA; omit the dependency from production distributions.
 
-## Offline and first-publication fallback
+## Offline alternative
 
-Studio can export a local Swift package and Android AAR. While a new Android version is waiting for Maven Central publication, the version-tagged GitHub Maven repository is also usable without credentials:
+Studio can export a local Swift package and Android AAR. For an entirely offline Android integration, put the exported AAR in the app's `libs` directory and add:
 
 ```kotlin
-// settings.gradle.kts → dependencyResolutionManagement.repositories
-maven {
-    url = uri("https://raw.githubusercontent.com/GKObakhidze/E2E-Studio-SDK/v0.2.0/maven")
-    content { includeGroup("io.github.gkobakhidze") }
-}
+debugImplementation(files("libs/e2e-studio-sdk-0.2.0.aar"))
 ```
 
-The fallback is optional and requires that the version tag exists; it is not needed once the version is available in Maven Central. No user-level/global Gradle configuration is installed by Studio.
+Choose either the setup plugin or a manual dependency; do not add both. SDK source is MIT-licensed, and operation is local between Studio and the device. No subscription or runtime cloud service is involved.
