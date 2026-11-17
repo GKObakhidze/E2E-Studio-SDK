@@ -32,11 +32,11 @@ That completes application integration: no SDK import, startup call, AppDelegate
 
 This preview supports iOS Simulator. SwiftUI/WebView UI and iOS gestures continue with System Driver in Auto mode; automatic startup does not change operation coverage. SDK startup is compiled out in Release. To omit SDK code entirely from production, leave the product out of the production app target (use a separate SDK-enabled test target).
 
-## UIKit control-actions development branch
+## UIKit and SwiftUI actions development branch
 
-The unreleased `feature/ios-uikit-actions` branch adds UIKit control activation and reports status revision `uikit-actions-preview.1`. It is not part of the `v0.2.0` tag; select this branch in SwiftPM to try it. Package-only Debug startup is unchanged.
+The unreleased `feature/ios-uikit-actions` branch adds UIKit control activation and reports status revision `swiftui-actions-preview.1`. It is not part of the `v0.2.0` tag; select this branch in SwiftPM to try it. Package-only Debug startup is unchanged.
 
-This branch supports focusing editable UITextField/UITextView, UIButton primary/touch-up actions, and UISwitch toggling/valueChanged. It uses public UIKit control APIs, not synthesized touch events. SwiftUI/WebView, arbitrary gesture recognizers, custom controls, swipe/hold/double tap and system windows still need System Driver. Auto can negotiate `/tap-check` before dispatch; UIKit transitions may briefly report pending. A sent action must never be replayed after a timeout or error. SDK only explicitly rejects unsupported targets.
+This branch supports focusing editable UITextField/UITextView, UIButton primary/touch-up actions, and UISwitch toggling/valueChanged. It uses public UIKit control APIs, not synthesized touch events. On iOS 18.1+, SwiftUI standard controls are exposed through public automation/accessibility containers and activate through the public accessibility action. UITextField/SecureField bindings, SwiftUI buttons and Toggle passed the native strict-SDK fixture. WebView, arbitrary gestures, unsupported custom controls and system windows still need System Driver; older iOS versions retain the SwiftUI System fallback. Auto can negotiate `/tap-check` before dispatch; UIKit transitions may briefly report pending. A sent action must never be replayed after a timeout or error. SDK only explicitly rejects unsupported targets.
 
 Pair this branch with the Studio UIKit-actions preview. The desktop repository's checkout sample runs six local form/review/edit/confirm cycles from one shared unit in SDK-only and System modes; both routes assert actual values and the selected backend. The rest of this README describes the released 0.2.0 baseline.
 

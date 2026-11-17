@@ -138,7 +138,9 @@ private final class SDKServer {
             || controller.presentedViewController.map(hasSwiftUIController) == true
     }
     @MainActor private func hasUnsupportedUI(_ window: UIWindow) -> Bool {
-        hasWebView(window) || window.rootViewController.map(hasSwiftUIController) == true
+        if hasWebView(window) { return true }
+        if #available(iOS 18.1, *) { return false }
+        return window.rootViewController.map(hasSwiftUIController) == true
     }
     @MainActor private func handle(_ method: String,_ path: String,_ body: [String:Any]) throws -> Any {
         let views = windows()
@@ -146,7 +148,7 @@ private final class SDKServer {
         if method == "GET" && path == "/status" {
             let supported = !views.isEmpty && !views.contains(where: hasUnsupportedUI)
             return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.2.0","platform":"ios",
-                    "revision":"uikit-actions-preview.1",
+                    "revision":"swiftui-actions-preview.1",
                     "appId":Bundle.main.bundleIdentifier ?? "", "ready":ready,
                     "capabilities":supported ? ["hierarchy","tap","tap-check","type","clear","keyboard-hide"] : []] as [String:Any]
         }
@@ -154,20 +156,27 @@ private final class SDKServer {
             return ["fields": views.flatMap { diagnosticFields($0) }]
         }
         guard ready else { throw SDKError("Application is not the foreground app",code:"NOT_FOREGROUND") }
-        guard !views.contains(where:hasUnsupportedUI) else { throw SDKError("SwiftUI/WebView requires System Driver",code:"UNSUPPORTED_UI") }
+        guard !views.contains(where:hasUnsupportedUI) else { throw SDKError("WebView or SwiftUI on this OS requires System Driver",code:"UNSUPPORTED_UI") }
         if method == "GET" && path == "/hierarchy" {
             let frame = views.first!.screen.bounds
-            return ["root":["className":"Application","bounds":bounds(frame),"children":views.map { node($0,0) }],
+            var seen=Set<ObjectIdentifier>()
+            let swiftUI=views.contains { $0.rootViewController.map(hasSwiftUIController) == true }
+            let children=swiftUI ? views.compactMap { semanticNode($0,0,&seen) } : views.map { node($0,0) }
+            return ["root":["className":"Application","bounds":bounds(frame),"children":children],
                     "screenSize":["width":Int(frame.width),"height":Int(frame.height)]] as [String:Any]
         }
         guard method == "POST" else { throw SDKError("Unsupported SDK operation") }
         if path == "/tap-check" {
             // Read-only negotiation: Auto can choose System before any action is dispatched.
-            return ["supported": tapTarget(views, body) != nil,
+            return ["supported": tapTarget(views, body) != nil || accessibilityTapTarget(views, body) != nil,
                     "pending": views.contains { $0.rootViewController.map(isTransitioning) == true }]
         }
         if path == "/tap" {
-            guard let target = tapTarget(views, body) else { throw SDKError("Target needs a System Driver gesture; select Auto", code:"UNSUPPORTED_ACTION") }
+            guard let target = tapTarget(views, body) else {
+                guard let element=accessibilityTapTarget(views,body) else { throw SDKError("Target needs a System Driver gesture; select Auto", code:"UNSUPPORTED_ACTION") }
+                guard element.accessibilityActivate() else { throw SDKError("Accessibility element did not activate; action was not replayed") }
+                return true
+            }
             if let field = target as? UITextField {
                 guard field.becomeFirstResponder() else { throw SDKError("Input declined keyboard focus") }
             } else if let text = target as? UITextView {
@@ -219,7 +228,58 @@ private final class SDKServer {
             || controller.children.contains(where:isTransitioning)
             || controller.presentedViewController.map(isTransitioning) == true
     }
+    @MainActor private func accessibilityTapTarget(_ windows: [UIWindow],_ body: [String:Any]) -> NSObject? {
+        guard #available(iOS 18.1, *), let x=body["x"] as? NSNumber, let y=body["y"] as? NSNumber,
+              x.doubleValue.isFinite, y.doubleValue.isFinite else { return nil }
+        let point=CGPoint(x:x.doubleValue,y:y.doubleValue)
+        for window in windows.sorted(by:{ $0.windowLevel > $1.windowLevel }) {
+            guard window.hitTest(window.convert(point,from:nil),with:nil) != nil else { continue }
+            guard let element=window.accessibilityHitTest(point,event:nil) as? NSObject,
+                  element.isAccessibilityElement, element.accessibilityFrame.contains(point),
+                  element.accessibilityTraits.contains(.button), !element.accessibilityTraits.contains(.notEnabled) else { return nil }
+            return element
+        }
+        return nil
+    }
+    /// Public automation/accessibility containers expose SwiftUI's virtual elements alongside
+    /// UIKit representables. No SwiftUI reflection, private selectors or app view changes.
+    @MainActor private func semanticChildren(_ object: NSObject) -> [NSObject] {
+        if #available(iOS 17.0, *), let elements=object.automationElements, !elements.isEmpty { return elements.compactMap { $0 as? NSObject } }
+        if let elements=object.accessibilityElements, !elements.isEmpty { return elements.compactMap { $0 as? NSObject } }
+        let count=object.accessibilityElementCount()
+        if count > 0 && count < 5000 { return (0..<count).compactMap { object.accessibilityElement(at:$0) as? NSObject } }
+        if object.isAccessibilityElement { return [] }
+        return (object as? UIView)?.subviews ?? []
+    }
+    @MainActor private func semanticNode(_ object: NSObject,_ depth: Int,_ seen: inout Set<ObjectIdentifier>) -> [String:Any]? {
+        guard depth < 60, seen.count < 5000, seen.insert(ObjectIdentifier(object)).inserted else { return nil }
+        var result: [String:Any]
+        if let view=object as? UIView {
+            result=nodeAttributes(view)
+        } else {
+            let traits=object.accessibilityTraits, rect=object.accessibilityFrame
+            let button=traits.contains(.button)
+            result=["className":button ? "SwiftUI.Button" : "SwiftUI.Text", "bounds":bounds(rect),
+                    "visible":!rect.isEmpty && rect.intersects(UIScreen.main.bounds), "enabled":!traits.contains(.notEnabled),
+                    "clickable":button, "role":button ? "button" : "text"]
+            if let label=object.accessibilityLabel { result["text"]=label;result["label"]=label }
+            if #available(iOS 18.1, *), let field=object.accessibilityTextInputResponder as? UITextField {
+                result["className"]="SwiftUI.TextField";result["role"]="textbox";result["clickable"]=field.isEnabled
+                result["value"]=field.isSecureTextEntry ? "" : field.text;result["hint"]=field.placeholder
+                result["focused"]=field.isFirstResponder;result.removeValue(forKey:"text")
+            }
+        }
+        if let id=accessibilityID(object), !id.isEmpty { result["id"]=id }
+        result["children"]=semanticChildren(object).compactMap { semanticNode($0,depth+1,&seen) }
+        return result
+    }
     /// Debugging metadata only; secure text is never returned.
+    @MainActor private func accessibilityID(_ object: NSObject) -> String? {
+        // Some framework-vended objects implement the public getter without declaring protocol conformance.
+        if let identified=object as? UIAccessibilityIdentification { return identified.accessibilityIdentifier }
+        let getter=NSSelectorFromString("accessibilityIdentifier")
+        return object.responds(to:getter) ? object.perform(getter)?.takeUnretainedValue() as? String : nil
+    }
     @MainActor private func diagnosticFields(_ view: UIView) -> [[String:Any]] {
         var fields: [[String:Any]] = []
         if let field = view as? UITextField {
@@ -240,6 +300,11 @@ private final class SDKServer {
         ["left":coordinate(r.minX),"top":coordinate(r.minY),"right":coordinate(r.maxX),"bottom":coordinate(r.maxY)]
     }
     @MainActor private func node(_ view: UIView,_ depth: Int) -> [String:Any] {
+        var result=nodeAttributes(view)
+        result["children"] = depth < 60 ? view.subviews.map { node($0,depth+1) } : []
+        return result
+    }
+    @MainActor private func nodeAttributes(_ view: UIView) -> [String:Any] {
         let rect = view.convert(view.bounds,to:nil)
         var result: [String:Any] = ["className":String(describing:type(of:view)),"bounds":bounds(rect),"enabled":(view as? UIControl)?.isEnabled ?? true,
             "visible":!view.isHidden && view.alpha > 0.01 && view.window != nil && rect.intersects(view.window?.bounds ?? .zero),"focused":view.isFirstResponder]
@@ -250,7 +315,6 @@ private final class SDKServer {
         if let text = view as? UITextView { result["value"] = text.isSecureTextEntry ? "" : text.text; result["clickable"] = text.isEditable }
         if let toggle = view as? UISwitch { result["checked"] = toggle.isOn; result["value"] = toggle.isOn ? "1" : "0"; result["clickable"] = toggle.isEnabled }
         if let button = view as? UIButton { result["text"] = button.currentTitle; result["clickable"] = true; result["enabled"] = button.isEnabled }
-        result["children"] = depth < 60 ? view.subviews.map { node($0,depth+1) } : []
         return result
     }
 }
