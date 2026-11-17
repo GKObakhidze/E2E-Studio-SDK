@@ -168,7 +168,8 @@ private final class SDKServer {
         guard method == "POST" else { throw SDKError("Unsupported SDK operation") }
         if path == "/tap-check" {
             // Read-only negotiation: Auto can choose System before any action is dispatched.
-            return ["supported": tapTarget(views, body) != nil || accessibilityTapTarget(views, body) != nil,
+            let supported=tapTarget(views, body) != nil || accessibilityTapTarget(views, body) != nil
+            return ["supported": supported, "blocked":!supported && expectedTargetExists(views,body),
                     "pending": views.contains { $0.rootViewController.map(isTransitioning) == true }]
         }
         if path == "/tap" {
@@ -209,11 +210,11 @@ private final class SDKServer {
             guard let hit = window.hitTest(window.convert(point, from:nil), with:nil) else { continue }
             var current: UIView? = hit
             while let view = current {
-                if let field = view as? UITextField { return field.isEnabled ? field : nil }
-                if let text = view as? UITextView { return text.isEditable ? text : nil }
-                if let toggle = view as? UISwitch { return toggle.isEnabled ? toggle : nil }
+                if let field = view as? UITextField { return field.isEnabled && matchesTarget(field,body) ? field : nil }
+                if let text = view as? UITextView { return text.isEditable && matchesTarget(text,body) ? text : nil }
+                if let toggle = view as? UISwitch { return toggle.isEnabled && matchesTarget(toggle,body) ? toggle : nil }
                 if let button = view as? UIButton {
-                    return button.isEnabled && !button.allControlEvents.intersection([.touchUpInside,.primaryActionTriggered]).isEmpty ? button : nil
+                    return button.isEnabled && matchesTarget(button,body) && !button.allControlEvents.intersection([.touchUpInside,.primaryActionTriggered]).isEmpty ? button : nil
                 }
                 // Standard controls own internal decoration/recognizer views (including UISwitch).
                 // Activate the nearest supported ancestor, never a view behind the hit-test result.
@@ -236,10 +237,35 @@ private final class SDKServer {
             guard window.hitTest(window.convert(point,from:nil),with:nil) != nil else { continue }
             guard let element=window.accessibilityHitTest(point,event:nil) as? NSObject,
                   element.isAccessibilityElement, element.accessibilityFrame.contains(point),
+                  matchesTarget(element,body),
                   element.accessibilityTraits.contains(.button), !element.accessibilityTraits.contains(.notEnabled) else { return nil }
             return element
         }
         return nil
+    }
+    @MainActor private func matchesTarget(_ object: NSObject,_ body: [String:Any]) -> Bool {
+        if let id=body["targetId"] as? String, !id.isEmpty { return accessibilityID(object)==id }
+        if let label=body["targetLabel"] as? String, !label.isEmpty {
+            return [object.accessibilityLabel,(object as? UIButton)?.currentTitle,(object as? UILabel)?.text,(object as? UITextField)?.placeholder].contains { $0==label }
+        }
+        return true
+    }
+    @MainActor private func expectedTargetExists(_ windows: [UIWindow],_ body: [String:Any]) -> Bool {
+        guard body["targetId"] != nil || body["targetLabel"] != nil,
+              let x=body["x"] as? NSNumber, let y=body["y"] as? NSNumber else { return false }
+        let point=CGPoint(x:x.doubleValue,y:y.doubleValue)
+        var seen=Set<ObjectIdentifier>()
+        func visit(_ object: NSObject,_ depth: Int) -> Bool {
+            guard depth < 60, seen.count < 5000, seen.insert(ObjectIdentifier(object)).inserted else { return false }
+            let view=object as? UIView
+            let frame=view.map { $0.convert($0.bounds,to:nil) } ?? object.accessibilityFrame
+            let active=view.map { !$0.isHidden && $0.alpha > 0.01 && $0.window != nil } ?? object.isAccessibilityElement
+            let control=object is UITextField || object is UITextView || object is UIButton || object is UISwitch || object.accessibilityTraits.contains(.button)
+            if active && control && frame.contains(point) && matchesTarget(object,body) { return true }
+            let children=semanticChildren(object) + ((object as? UIView)?.subviews.map { $0 as NSObject } ?? [])
+            return children.contains { visit($0,depth+1) }
+        }
+        return windows.contains { visit($0,0) }
     }
     /// Public automation/accessibility containers expose SwiftUI's virtual elements alongside
     /// UIKit representables. No SwiftUI reflection, private selectors or app view changes.
