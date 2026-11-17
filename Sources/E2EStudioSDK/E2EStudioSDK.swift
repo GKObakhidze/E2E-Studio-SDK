@@ -147,8 +147,8 @@ private final class SDKServer {
         let ready = UIApplication.shared.applicationState == .active && !views.isEmpty
         if method == "GET" && path == "/status" {
             let supported = !views.isEmpty && !views.contains(where: hasUnsupportedUI)
-            return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.2.0","platform":"ios",
-                    "revision":"swiftui-actions-preview.1",
+            return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.3.0","platform":"ios",
+                    "revision":"swiftui-actions.1",
                     "appId":Bundle.main.bundleIdentifier ?? "", "ready":ready,
                     "capabilities":supported ? ["hierarchy","tap","tap-check","type","clear","keyboard-hide"] : []] as [String:Any]
         }
@@ -236,6 +236,7 @@ private final class SDKServer {
         for window in windows.sorted(by:{ $0.windowLevel > $1.windowLevel }) {
             guard window.hitTest(window.convert(point,from:nil),with:nil) != nil else { continue }
             guard let element=window.accessibilityHitTest(point,event:nil) as? NSObject,
+                  !(element is UIView),
                   element.isAccessibilityElement, element.accessibilityFrame.contains(point),
                   matchesTarget(element,body),
                   element.accessibilityTraits.contains(.button), !element.accessibilityTraits.contains(.notEnabled) else { return nil }
@@ -260,7 +261,7 @@ private final class SDKServer {
             let view=object as? UIView
             let frame=view.map { $0.convert($0.bounds,to:nil) } ?? object.accessibilityFrame
             let active=view.map { !$0.isHidden && $0.alpha > 0.01 && $0.window != nil } ?? object.isAccessibilityElement
-            let control=object is UITextField || object is UITextView || object is UIButton || object is UISwitch || object.accessibilityTraits.contains(.button)
+            let control=object is UITextField || object is UITextView || object is UIButton || object is UISwitch || (!(object is UIView) && object.accessibilityTraits.contains(.button))
             if active && control && frame.contains(point) && matchesTarget(object,body) { return true }
             let children=semanticChildren(object) + ((object as? UIView)?.subviews.map { $0 as NSObject } ?? [])
             return children.contains { visit($0,depth+1) }
