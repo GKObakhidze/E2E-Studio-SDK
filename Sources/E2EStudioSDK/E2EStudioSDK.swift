@@ -147,7 +147,7 @@ private final class SDKServer {
         let ready = UIApplication.shared.applicationState == .active && !views.isEmpty
         if method == "GET" && path == "/status" {
             let supported = !views.isEmpty && !views.contains(where: hasUnsupportedUI)
-            return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.3.0","platform":"ios",
+            return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.3.1","platform":"ios",
                     "revision":"swiftui-actions.1",
                     "appId":Bundle.main.bundleIdentifier ?? "", "ready":ready,
                     "capabilities":supported ? ["hierarchy","tap","tap-check","type","clear","keyboard-hide"] : []] as [String:Any]
@@ -187,6 +187,9 @@ private final class SDKServer {
             } else if let button = target as? UIButton {
                 let event: UIControl.Event = button.allControlEvents.contains(.primaryActionTriggered) ? .primaryActionTriggered : .touchUpInside
                 button.sendActions(for:event)
+            } else if let control = target as? UIControl {
+                let event: UIControl.Event = control.allControlEvents.contains(.primaryActionTriggered) ? .primaryActionTriggered : .touchUpInside
+                control.sendActions(for:event)
             }
             return true
         }
@@ -208,13 +211,17 @@ private final class SDKServer {
         let point = CGPoint(x:x.doubleValue, y:y.doubleValue)
         for window in windows.sorted(by: { $0.windowLevel > $1.windowLevel }) {
             guard let hit = window.hitTest(window.convert(point, from:nil), with:nil) else { continue }
+            if isNativeAlertElement(hit) { return nil }
             var current: UIView? = hit
             while let view = current {
                 if let field = view as? UITextField { return field.isEnabled && matchesTarget(field,body) ? field : nil }
                 if let text = view as? UITextView { return text.isEditable && matchesTarget(text,body) ? text : nil }
                 if let toggle = view as? UISwitch { return toggle.isEnabled && matchesTarget(toggle,body) ? toggle : nil }
                 if let button = view as? UIButton {
-                    return button.isEnabled && matchesTarget(button,body) && !button.allControlEvents.intersection([.touchUpInside,.primaryActionTriggered]).isEmpty ? button : nil
+                    if button.isEnabled && matchesTarget(button,body) && !button.allControlEvents.intersection([.touchUpInside,.primaryActionTriggered]).isEmpty { return button }
+                }
+                if let control = view as? UIControl {
+                    if control.isEnabled && matchesTarget(control,body) && !control.allControlEvents.intersection([.touchUpInside,.primaryActionTriggered]).isEmpty { return control }
                 }
                 // Standard controls own internal decoration/recognizer views (including UISwitch).
                 // Activate the nearest supported ancestor, never a view behind the hit-test result.
@@ -236,13 +243,23 @@ private final class SDKServer {
         for window in windows.sorted(by:{ $0.windowLevel > $1.windowLevel }) {
             guard window.hitTest(window.convert(point,from:nil),with:nil) != nil else { continue }
             guard let element=window.accessibilityHitTest(point,event:nil) as? NSObject,
-                  !(element is UIView),
+                  !isNativeAlertElement(element),
                   element.isAccessibilityElement, element.accessibilityFrame.contains(point),
                   matchesTarget(element,body),
                   element.accessibilityTraits.contains(.button), !element.accessibilityTraits.contains(.notEnabled) else { return nil }
             return element
         }
         return nil
+    }
+    @MainActor private func isNativeAlertElement(_ object: NSObject) -> Bool {
+        var current: NSObject?=object
+        var seen=Set<ObjectIdentifier>()
+        while let value=current, seen.insert(ObjectIdentifier(value)).inserted {
+            if value is UIAlertController { return true }
+            if let element=value as? UIAccessibilityElement { current=element.accessibilityContainer as? NSObject }
+            else { current=(value as? UIResponder)?.next }
+        }
+        return false
     }
     @MainActor private func matchesTarget(_ object: NSObject,_ body: [String:Any]) -> Bool {
         if let id=body["targetId"] as? String, !id.isEmpty { return accessibilityID(object)==id }
@@ -261,7 +278,7 @@ private final class SDKServer {
             let view=object as? UIView
             let frame=view.map { $0.convert($0.bounds,to:nil) } ?? object.accessibilityFrame
             let active=view.map { !$0.isHidden && $0.alpha > 0.01 && $0.window != nil } ?? object.isAccessibilityElement
-            let control=object is UITextField || object is UITextView || object is UIButton || object is UISwitch || (!(object is UIView) && object.accessibilityTraits.contains(.button))
+            let control=object is UITextField || object is UITextView || object is UIButton || object is UISwitch || (!isNativeAlertElement(object) && object.accessibilityTraits.contains(.button))
             if active && control && frame.contains(point) && matchesTarget(object,body) { return true }
             let children=semanticChildren(object) + ((object as? UIView)?.subviews.map { $0 as NSObject } ?? [])
             return children.contains { visit($0,depth+1) }
