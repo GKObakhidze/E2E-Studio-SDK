@@ -111,7 +111,7 @@ public final class E2EStudioSdk implements Application.ActivityLifecycleCallback
             Activity a=current.get();View v=a==null?null:a.getWindow().getDecorView();
             boolean nativeViews=v!=null&&!hasCompose(v);
             JSONArray caps=nativeViews?new JSONArray(new String[]{"hierarchy","tap","type","clear","keyboard-hide"}):new JSONArray();
-            return new JSONObject().put("product","e2e-studio-inapp-sdk").put("protocol",1).put("version","0.2.0")
+            return new JSONObject().put("product","e2e-studio-inapp-sdk").put("protocol",1).put("version","0.3.1")
                 .put("platform","android").put("appId",app.getPackageName()).put("capabilities",caps).put("ready",a!=null&&a.hasWindowFocus());
         }
         View root=root();

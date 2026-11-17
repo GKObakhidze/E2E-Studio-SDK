@@ -1,4 +1,4 @@
-// E2E Studio SDK 0.2.0 — MIT. Apply once in an Android application module.
+// E2E Studio SDK 0.3.1 — MIT. Apply once in an Android application module.
 // Adds a Debug-only dependency; never changes application source or repository settings.
 import java.nio.channels.FileChannel
 import java.nio.file.Files
@@ -6,9 +6,9 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 
-final String sdkVersion = '0.2.0'
-final String sdkHash = '5c5a08bb5ccee31d0e52b0dbf80616abe4b668281f5429e54f79ec92c48acfc5'
-final String sdkUrl = 'https://raw.githubusercontent.com/GKObakhidze/E2E-Studio-SDK/v0.2.0/maven/io/github/gkobakhidze/e2e-studio-sdk/0.2.0/e2e-studio-sdk-0.2.0.aar'
+final String sdkVersion = '0.3.1'
+final String sdkHash = 'e7e12ec06dfdb22d5e2fcba64e3e2fd7c14f63a27bdfabea6081f01319bba245'
+final String sdkUrl = 'https://raw.githubusercontent.com/GKObakhidze/E2E-Studio-SDK/v0.3.1/maven/io/github/gkobakhidze/e2e-studio-sdk/0.3.1/e2e-studio-sdk-0.3.1.aar'
 final String marker = 'dev.e2estudio.sdk.configuredVersion'
 if (project.extensions.extraProperties.has(marker)) {
     if (project.extensions.extraProperties.get(marker) != sdkVersion)
