@@ -32,6 +32,14 @@ That completes application integration: no SDK import, startup call, AppDelegate
 
 This preview supports iOS Simulator. SwiftUI/WebView UI and iOS gestures continue with System Driver in Auto mode; automatic startup does not change operation coverage. SDK startup is compiled out in Release. To omit SDK code entirely from production, leave the product out of the production app target (use a separate SDK-enabled test target).
 
+## UIKit control-actions development branch
+
+The unreleased `feature/ios-uikit-actions` branch adds UIKit control activation and reports status revision `uikit-actions-preview.1`. It is not part of the `v0.2.0` tag; select this branch in SwiftPM to try it. Package-only Debug startup is unchanged.
+
+This branch supports focusing editable UITextField/UITextView, UIButton primary/touch-up actions, and UISwitch toggling/valueChanged. It uses public UIKit control APIs, not synthesized touch events. SwiftUI/WebView, arbitrary gesture recognizers, custom controls, swipe/hold/double tap and system windows still need System Driver. Auto can negotiate `/tap-check` before dispatch; UIKit transitions may briefly report pending. A sent action must never be replayed after a timeout or error. SDK only explicitly rejects unsupported targets.
+
+Pair this branch with the Studio UIKit-actions preview. The desktop repository's checkout sample runs six local form/review/edit/confirm cycles from one shared unit in SDK-only and System modes; both routes assert actual values and the selected backend. The rest of this README describes the released 0.2.0 baseline.
+
 ## Verify in Studio
 
 Set the app's package/bundle identifier in Applications, leave **Auto — In-app SDK preferred**, and launch the app from a scenario or Inspector. Observe the actual driver and reason; choosing Auto alone does not prove SDK use. Missing SDK or unsupported operations automatically use System Driver. SDK-only is available for diagnostics and explicitly fails for unsupported actions.

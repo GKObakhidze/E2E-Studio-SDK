@@ -3,7 +3,7 @@ import WebKit
 import Foundation
 import Darwin
 
-/// UIKit test-build SDK. Gestures remain with System Driver until an equivalent public-API implementation is validated.
+/// UIKit test-build SDK. Controls use public UIKit actions; raw gestures remain with System Driver.
 public enum E2EStudioSDK {
     private static var server: SDKServer?
     @MainActor public static func startIfRequested() {
@@ -146,20 +146,40 @@ private final class SDKServer {
         if method == "GET" && path == "/status" {
             let supported = !views.isEmpty && !views.contains(where: hasUnsupportedUI)
             return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.2.0","platform":"ios",
+                    "revision":"uikit-actions-preview.1",
                     "appId":Bundle.main.bundleIdentifier ?? "", "ready":ready,
-                    "capabilities":supported ? ["hierarchy","type","clear","keyboard-hide"] : []] as [String:Any]
+                    "capabilities":supported ? ["hierarchy","tap","tap-check","type","clear","keyboard-hide"] : []] as [String:Any]
         }
         if method == "GET" && path == "/diagnostics" {
             return ["fields": views.flatMap { diagnosticFields($0) }]
         }
         guard ready else { throw SDKError("Application is not the foreground app",code:"NOT_FOREGROUND") }
-        guard !views.contains(where:hasUnsupportedUI) else { throw SDKError("SwiftUI/WebView requires System Driver in SDK 0.1",code:"UNSUPPORTED_UI") }
+        guard !views.contains(where:hasUnsupportedUI) else { throw SDKError("SwiftUI/WebView requires System Driver",code:"UNSUPPORTED_UI") }
         if method == "GET" && path == "/hierarchy" {
             let frame = views.first!.screen.bounds
             return ["root":["className":"Application","bounds":bounds(frame),"children":views.map { node($0,0) }],
                     "screenSize":["width":Int(frame.width),"height":Int(frame.height)]] as [String:Any]
         }
         guard method == "POST" else { throw SDKError("Unsupported SDK operation") }
+        if path == "/tap-check" {
+            // Read-only negotiation: Auto can choose System before any action is dispatched.
+            return ["supported": tapTarget(views, body) != nil,
+                    "pending": views.contains { $0.rootViewController.map(isTransitioning) == true }]
+        }
+        if path == "/tap" {
+            guard let target = tapTarget(views, body) else { throw SDKError("Target needs a System Driver gesture; select Auto", code:"UNSUPPORTED_ACTION") }
+            if let field = target as? UITextField {
+                guard field.becomeFirstResponder() else { throw SDKError("Input declined keyboard focus") }
+            } else if let text = target as? UITextView {
+                guard text.becomeFirstResponder() else { throw SDKError("Input declined keyboard focus") }
+            } else if let toggle = target as? UISwitch {
+                toggle.setOn(!toggle.isOn, animated:false); toggle.sendActions(for:.valueChanged)
+            } else if let button = target as? UIButton {
+                let event: UIControl.Event = button.allControlEvents.contains(.primaryActionTriggered) ? .primaryActionTriggered : .touchUpInside
+                button.sendActions(for:event)
+            }
+            return true
+        }
         if path == "/keyboard-hide" { views.forEach { $0.endEditing(true) }; return true }
         guard let view = views.compactMap({ responder($0) }).first, let input = view as? UIKeyInput else { throw SDKError("Focus an editable UIKit text field first") }
         if path == "/type", let text = body["text"] as? String { input.insertText(text); return true }
@@ -169,6 +189,35 @@ private final class SDKServer {
             input.deleteBackward(); return true
         }
         throw SDKError("Unsupported SDK operation")
+    }
+    /// Resolve only controls whose public activation has known semantics. No private touch injection,
+    /// accessibilityActivate guessing, or mutation happens during capability negotiation.
+    @MainActor private func tapTarget(_ windows: [UIWindow], _ body: [String:Any]) -> UIView? {
+        guard let x = body["x"] as? NSNumber, let y = body["y"] as? NSNumber,
+              x.doubleValue.isFinite, y.doubleValue.isFinite else { return nil }
+        let point = CGPoint(x:x.doubleValue, y:y.doubleValue)
+        for window in windows.sorted(by: { $0.windowLevel > $1.windowLevel }) {
+            guard let hit = window.hitTest(window.convert(point, from:nil), with:nil) else { continue }
+            var current: UIView? = hit
+            while let view = current {
+                if let field = view as? UITextField { return field.isEnabled ? field : nil }
+                if let text = view as? UITextView { return text.isEditable ? text : nil }
+                if let toggle = view as? UISwitch { return toggle.isEnabled ? toggle : nil }
+                if let button = view as? UIButton {
+                    return button.isEnabled && !button.allControlEvents.intersection([.touchUpInside,.primaryActionTriggered]).isEmpty ? button : nil
+                }
+                // Standard controls own internal decoration/recognizer views (including UISwitch).
+                // Activate the nearest supported ancestor, never a view behind the hit-test result.
+                current = view.superview
+            }
+            return nil
+        }
+        return nil
+    }
+    @MainActor private func isTransitioning(_ controller: UIViewController) -> Bool {
+        controller.isBeingPresented || controller.isBeingDismissed || controller.transitionCoordinator != nil
+            || controller.children.contains(where:isTransitioning)
+            || controller.presentedViewController.map(isTransitioning) == true
     }
     /// Debugging metadata only; secure text is never returned.
     @MainActor private func diagnosticFields(_ view: UIView) -> [[String:Any]] {
@@ -197,8 +246,9 @@ private final class SDKServer {
         if let id = view.accessibilityIdentifier { result["id"] = id }
         if let label = view.accessibilityLabel { result["label"] = label }
         if let label = view as? UILabel { result["text"] = label.text }
-        if let field = view as? UITextField { result["value"] = field.isSecureTextEntry ? "" : field.text; result["hint"] = field.placeholder }
-        if let text = view as? UITextView { result["value"] = text.isSecureTextEntry ? "" : text.text }
+        if let field = view as? UITextField { result["value"] = field.isSecureTextEntry ? "" : field.text; result["hint"] = field.placeholder; result["clickable"] = field.isEnabled }
+        if let text = view as? UITextView { result["value"] = text.isSecureTextEntry ? "" : text.text; result["clickable"] = text.isEditable }
+        if let toggle = view as? UISwitch { result["checked"] = toggle.isOn; result["value"] = toggle.isOn ? "1" : "0"; result["clickable"] = toggle.isEnabled }
         if let button = view as? UIButton { result["text"] = button.currentTitle; result["clickable"] = true; result["enabled"] = button.isEnabled }
         result["children"] = depth < 60 ? view.subviews.map { node($0,depth+1) } : []
         return result
