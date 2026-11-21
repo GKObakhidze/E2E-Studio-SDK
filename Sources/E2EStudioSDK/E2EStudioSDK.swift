@@ -6,18 +6,58 @@ import Darwin
 /// UIKit test-build SDK. Controls use public UIKit actions; raw gestures remain with System Driver.
 public enum E2EStudioSDK {
     private static var server: SDKServer?
+    private static var passwordGuard: Timer?
+
+    /// iOS offers no per-app switch for password prompts on a real device, and the phone's setting must stay untouched.
+    /// For this test process only, credential fields are marked so AutoFill neither suggests nor offers to save.
+    @MainActor public static func hidePasswordSuggestionsIfRequested() {
+        #if DEBUG
+        guard passwordGuard == nil, ProcessInfo.processInfo.environment["E2E_SDK_HIDE_PASSWORD_SUGGESTIONS"] == "1" else { return }
+        sweepCredentialFields()
+        let timer = Timer(timeInterval: 0.05, repeats: true) { _ in MainActor.assumeIsolated { sweepCredentialFields() } }
+        RunLoop.main.add(timer, forMode: .common)
+        passwordGuard = timer
+        #endif
+    }
+
+    @MainActor static func sweepCredentialFields() {
+        guard passwordGuard != nil || ProcessInfo.processInfo.environment["E2E_SDK_HIDE_PASSWORD_SUGGESTIONS"] == "1" else { return }
+        func visit(_ view: UIView) {
+            // Username detection also uses plain fields next to a password, so every field is marked.
+            if let field = view as? UITextField, field.textContentType != .oneTimeCode {
+                field.textContentType = .oneTimeCode
+                if field.isFirstResponder { field.reloadInputViews() }
+            }
+            view.subviews.forEach(visit)
+        }
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).forEach(visit)
+    }
     @MainActor public static func startIfRequested() {
         #if DEBUG
         let env = ProcessInfo.processInfo.environment
         guard server == nil, let token = env["E2E_SDK_TOKEN"], token.utf8.count >= 32,
               let port = env["E2E_SDK_PORT"].flatMap(UInt16.init), port >= 1024 else { return }
         let bind = env["E2E_SDK_BIND"].flatMap { $0.isEmpty ? nil : $0 }
+        if bind != nil { enableAccessibilityTree() }
         let instance = SDKServer(port: port, token: token, bindAddress: bind)
         server = instance
+        if bind != nil { instance.prepareForDevice() }
         instance.start()
         #endif
     }
 }
+
+#if DEBUG
+/// On a real device SwiftUI only vends its accessibility tree while an assistive client is active. Without XCTest
+/// the SDK is that client. Debug-only and resolved at runtime, so release binaries never reference these symbols.
+private func enableAccessibilityTree() {
+    guard let library = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW) else { return }
+    typealias Setter = @convention(c) (Int32) -> Void
+    for name in ["_AXSSetAutomationEnabled", "_AXSApplicationAccessibilitySetEnabled"] {
+        if let symbol = dlsym(library, name) { unsafeBitCast(symbol, to: Setter.self)(1) }
+    }
+}
+#endif
 
 private struct SDKError: Error {
     let message: String
@@ -53,6 +93,31 @@ private final class SDKServer {
         address.sin_port = port.bigEndian
         address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
         return withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } } == 0
+    }
+    private var keyboardFrame = CGRect.null
+    private var keyboardObservers: [NSObjectProtocol] = []
+    @MainActor func prepareForDevice() { observeKeyboard() }
+    @MainActor private func observeKeyboard() {
+        let center = NotificationCenter.default
+        keyboardObservers = [
+            center.addObserver(forName: UIResponder.keyboardDidChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
+                guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+                self?.keyboardFrame = frame.intersects(UIScreen.main.bounds) ? frame : .null
+            },
+            center.addObserver(forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.keyboardFrame = .null
+            },
+        ]
+    }
+    /// On a real device the text-effects window covers the screen even with the keyboard hidden, so hit-testing
+    /// it would block every control. A control under the visible keyboard still counts as covered.
+    @MainActor private func touchWindows(_ windows: [UIWindow], at point: CGPoint) -> [UIWindow] {
+        guard bindAddress != nil else { return windows }
+        if keyboardFrame.contains(point) { return [] }
+        return windows.filter { window in
+            let name = String(describing: type(of: window))
+            return !name.hasPrefix("UITextEffects") && !name.hasPrefix("UIRemoteKeyboard")
+        }
     }
     private func sameToken(_ header: String) -> Bool {
         let a = Array(header.utf8), b = Array("Bearer \(token)".utf8)
@@ -167,10 +232,10 @@ private final class SDKServer {
         let ready = UIApplication.shared.applicationState == .active && !views.isEmpty
         if method == "GET" && path == "/status" {
             let supported = !views.isEmpty && !views.contains(where: hasUnsupportedUI)
-            return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.3.2","platform":"ios",
-                    "revision":"usb-tunnel.1",
+            return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.3.3","platform":"ios",
+                    "revision":"usb-tunnel.6",
                     "appId":Bundle.main.bundleIdentifier ?? "", "ready":ready,
-                    "capabilities":supported ? ["hierarchy","tap","tap-check","type","clear","keyboard-hide"] + (bindAddress == nil ? [] : ["screenshot","swipe"]) : []] as [String:Any]
+                    "capabilities":supported ? ["hierarchy","tap","tap-check","type","clear","keyboard-hide"] + (bindAddress == nil ? [] : ["screenshot","swipe","alert"]) : []] as [String:Any]
         }
         if method == "GET" && path == "/diagnostics" {
             return ["fields": views.flatMap { diagnosticFields($0) }]
@@ -187,7 +252,9 @@ private final class SDKServer {
         }
         if method == "GET" && path == "/screenshot" && bindAddress != nil { return try screenshot(views) }
         guard method == "POST" else { throw SDKError("Unsupported SDK operation") }
+        E2EStudioSDK.sweepCredentialFields() // Covers a field tapped within the first frame after it appears.
         if path == "/swipe" && bindAddress != nil { return try scroll(views, body) }
+        if path == "/alert/accept" && bindAddress != nil { return acceptAlert(views, body) }
         if path == "/tap-check" {
             // Read-only negotiation: Auto can choose System before any action is dispatched.
             let supported=tapTarget(views, body) != nil || accessibilityTapTarget(views, body) != nil
@@ -234,6 +301,27 @@ private final class SDKServer {
         guard let data = image.pngData() else { throw SDKError("Could not capture the app") }
         return data.base64EncodedString()
     }
+    /// Activates a button of the app's own alert through accessibility. False means no such alert or button.
+    @MainActor private func acceptAlert(_ views: [UIWindow], _ body: [String:Any]) -> Bool {
+        guard let name = body["name"] as? String, !name.isEmpty else { return false }
+        for window in views {
+            var top = window.rootViewController
+            while let next = top?.presentedViewController { top = next }
+            guard let alert = top as? UIAlertController, alert.actions.contains(where: { $0.title == name }) else { continue }
+            var seen = Set<ObjectIdentifier>()
+            func press(_ object: NSObject, _ depth: Int) -> Bool {
+                guard depth < 40, seen.insert(ObjectIdentifier(object)).inserted else { return false }
+                if object.isAccessibilityElement, object.accessibilityLabel == name, object.accessibilityActivate() { return true }
+                let children = semanticChildren(object) + ((object as? UIView)?.subviews.map { $0 as NSObject } ?? [])
+                return children.contains { press($0, depth + 1) }
+            }
+            guard press(alert.view, 0) else { return false }
+            // Activation runs the action's handler but can leave the alert on screen; never run the handler twice.
+            DispatchQueue.main.async { if alert.presentingViewController != nil { alert.dismiss(animated: false) } }
+            return true
+        }
+        return false
+    }
     /// A public scroll-view offset change. Other gestures stay unsupported instead of being simulated.
     @MainActor private func scroll(_ views: [UIWindow], _ body: [String:Any]) throws -> Bool {
         guard let fromX = (body["fromX"] as? NSNumber)?.doubleValue, let fromY = (body["fromY"] as? NSNumber)?.doubleValue,
@@ -263,7 +351,7 @@ private final class SDKServer {
         guard let x = body["x"] as? NSNumber, let y = body["y"] as? NSNumber,
               x.doubleValue.isFinite, y.doubleValue.isFinite else { return nil }
         let point = CGPoint(x:x.doubleValue, y:y.doubleValue)
-        for window in windows.sorted(by: { $0.windowLevel > $1.windowLevel }) {
+        for window in touchWindows(windows, at: point).sorted(by: { $0.windowLevel > $1.windowLevel }) {
             guard let hit = window.hitTest(window.convert(point, from:nil), with:nil) else { continue }
             if isNativeAlertElement(hit) { return nil }
             var current: UIView? = hit
@@ -294,7 +382,7 @@ private final class SDKServer {
         guard #available(iOS 18.1, *), let x=body["x"] as? NSNumber, let y=body["y"] as? NSNumber,
               x.doubleValue.isFinite, y.doubleValue.isFinite else { return nil }
         let point=CGPoint(x:x.doubleValue,y:y.doubleValue)
-        for window in windows.sorted(by:{ $0.windowLevel > $1.windowLevel }) {
+        for window in touchWindows(windows, at: point).sorted(by:{ $0.windowLevel > $1.windowLevel }) {
             guard window.hitTest(window.convert(point,from:nil),with:nil) != nil else { continue }
             guard let element=window.accessibilityHitTest(point,event:nil) as? NSObject,
                   !isNativeAlertElement(element),
