@@ -1,0 +1,30 @@
+<?xml version='1.0' encoding='utf-8'?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>io.github.gkobakhidze</groupId>
+  <artifactId>e2e-studio-sdk</artifactId>
+  <version>0.3.2</version>
+  <packaging>aar</packaging>
+  <name>E2E Studio SDK</name>
+  <description>In-app automation SDK for Android debug/test builds.</description>
+  <url>https://github.com/GKObakhidze/E2E-Studio-SDK</url>
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://opensource.org/license/mit</url>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <id>GKObakhidze</id>
+      <name>E2E Studio contributors</name>
+      <url>https://github.com/GKObakhidze</url>
+    </developer>
+  </developers>
+  <scm>
+    <url>https://github.com/GKObakhidze/E2E-Studio-SDK</url>
+    <connection>scm:git:https://github.com/GKObakhidze/E2E-Studio-SDK.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/GKObakhidze/E2E-Studio-SDK.git</developerConnection>
+    <tag>v0.3.2</tag>
+  </scm>
+</project>

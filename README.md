@@ -1,4 +1,4 @@
-# E2E Studio SDK · 0.3.1 preview
+# E2E Studio SDK · 0.3.2 preview
 
 SDK integration for debug/test applications. Android and iOS share this public repository, version and protocol. Licensed under MIT.
 
@@ -7,13 +7,13 @@ SDK integration for debug/test applications. Android and iOS share this public r
 Add this line after `plugins { ... }` in the app module's `build.gradle.kts`:
 
 ```kotlin
-apply(from = "https://raw.githubusercontent.com/GKObakhidze/E2E-Studio-SDK/v0.3.1/android/e2e-studio-sdk.gradle")
+apply(from = "https://raw.githubusercontent.com/GKObakhidze/E2E-Studio-SDK/v0.3.2/android/e2e-studio-sdk.gradle")
 ```
 
 For Groovy `build.gradle`, the equivalent is:
 
 ```groovy
-apply from: "https://raw.githubusercontent.com/GKObakhidze/E2E-Studio-SDK/v0.3.1/android/e2e-studio-sdk.gradle"
+apply from: "https://raw.githubusercontent.com/GKObakhidze/E2E-Studio-SDK/v0.3.2/android/e2e-studio-sdk.gradle"
 ```
 
 Build and install Debug, then launch it through E2E Studio. This Gradle script plugin adds the SDK only to `debugImplementation`. The Android manifest provider starts it automatically in a debuggable application with Studio's session arguments. No Application/Activity edits, repository blocks, publishing accounts, tokens or global Gradle configuration are required.
@@ -25,7 +25,7 @@ The release artefacts are hosted in this public Git repository. No Maven Central
 ## iOS — add the Swift package
 
 1. In Xcode: File → Add Package Dependencies.
-2. Add `https://github.com/GKObakhidze/E2E-Studio-SDK.git` and select version **0.3.1**.
+2. Add `https://github.com/GKObakhidze/E2E-Studio-SDK.git` and select version **0.3.2**.
 3. Link the **E2EStudioSDK** product to the test app target. Build Debug for iOS Simulator.
 
 That completes application integration: no SDK import, startup call, AppDelegate/SwiftUI App edit or Info.plist flag is needed. The linked package schedules automatic startup on the main queue and requires Studio's session environment. The existing `startIfRequested()` API remains compatible with older explicit integrations and will not start a second server.
@@ -45,10 +45,10 @@ Listeners bind loopback and require a per-session credential. A normal launch wi
 Studio can export a local Swift package and Android AAR. For an entirely offline Android integration, put the exported AAR in the app's `libs` directory and add:
 
 ```kotlin
-debugImplementation(files("libs/e2e-studio-sdk-0.3.1.aar"))
+debugImplementation(files("libs/e2e-studio-sdk-0.3.2.aar"))
 ```
 
 Choose either the setup plugin or a manual dependency; do not add both. SDK source is MIT-licensed, and operation is local between Studio and the device. No subscription or runtime cloud service is involved.
 
 
-SDK 0.3.1 was verified on iOS 26.5 with a pure SwiftUI fixture (TextField/SecureField state bindings, Toggle and Button) and the unchanged BankApp authentication views. BankApp validates an invalid email, registers a local training account and logs out/in three times. App UI commands use the SDK; OS password suggestions and native alert confirmation use System Driver and are logged separately. This does not promise raw touch-event equivalence or support for every custom SwiftUI gesture. A read-only target/identity preflight prevents an overlay from receiving a tap intended for a field underneath it. Sent actions are never replayed after an error.
+SDK 0.3.2 adds a token-protected connection over the private USB tunnel for real iPhones in Debug builds. SDK 0.3.1 was verified on iOS 26.5 with a pure SwiftUI fixture (TextField/SecureField state bindings, Toggle and Button) and the unchanged BankApp authentication views. BankApp validates an invalid email, registers a local training account and logs out/in three times. App UI commands use the SDK; OS password suggestions and native alert confirmation use System Driver and are logged separately. This does not promise raw touch-event equivalence or support for every custom SwiftUI gesture. A read-only target/identity preflight prevents an overlay from receiving a tap intended for a field underneath it. Sent actions are never replayed after an error.

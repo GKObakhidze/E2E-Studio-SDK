@@ -11,7 +11,8 @@ public enum E2EStudioSDK {
         let env = ProcessInfo.processInfo.environment
         guard server == nil, let token = env["E2E_SDK_TOKEN"], token.utf8.count >= 32,
               let port = env["E2E_SDK_PORT"].flatMap(UInt16.init), port >= 1024 else { return }
-        let instance = SDKServer(port: port, token: token)
+        let bind = env["E2E_SDK_BIND"].flatMap { $0.isEmpty ? nil : $0 }
+        let instance = SDKServer(port: port, token: token, bindAddress: bind)
         server = instance
         instance.start()
         #endif
@@ -32,19 +33,38 @@ private final class SDKRequest {
 private final class SDKServer {
     let port: UInt16
     let token: String
-    init(port: UInt16, token: String) { self.port = port; self.token = token }
+    /// Real devices only: the private CoreDevice USB tunnel address. Nil keeps the Simulator's loopback.
+    let bindAddress: String?
+    init(port: UInt16, token: String, bindAddress: String? = nil) { self.port = port; self.token = token; self.bindAddress = bindAddress }
+    private func bindListener(_ listener: Int32) -> Bool {
+        if let bindAddress {
+            var yes: Int32 = 1
+            setsockopt(listener, IPPROTO_IPV6, IPV6_V6ONLY, &yes, socklen_t(MemoryLayout<Int32>.size))
+            var address = sockaddr_in6()
+            address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+            address.sin6_family = sa_family_t(AF_INET6)
+            address.sin6_port = port.bigEndian
+            guard inet_pton(AF_INET6, bindAddress, &address.sin6_addr) == 1 else { return false }
+            return withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in6>.size)) } } == 0
+        }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        return withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } } == 0
+    }
+    private func sameToken(_ header: String) -> Bool {
+        let a = Array(header.utf8), b = Array("Bearer \(token)".utf8)
+        guard a.count == b.count else { return false }
+        return zip(a, b).reduce(UInt8(0)) { $0 | ($1.0 ^ $1.1) } == 0
+    }
     func start() {
         DispatchQueue(label: "dev.e2estudio.sdk").async { [self] in
-            let listener = socket(AF_INET, SOCK_STREAM, 0)
+            let listener = socket(bindAddress == nil ? AF_INET : AF_INET6, SOCK_STREAM, 0)
             guard listener >= 0 else { return }
             defer { close(listener) }
-            var address = sockaddr_in()
-            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-            address.sin_family = sa_family_t(AF_INET)
-            address.sin_port = port.bigEndian
-            address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
-            let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener,$0,socklen_t(MemoryLayout<sockaddr_in>.size)) } }
-            guard bound == 0, listen(listener, 4) == 0 else { return }
+            guard bindListener(listener), listen(listener, 4) == 0 else { return }
             while true {
                 let client = accept(listener,nil,nil)
                 if client < 0 { return }
@@ -78,7 +98,7 @@ private final class SDKServer {
                 if pieces[0].lowercased() == "content-length" { size = Int(value) ?? -1 }
             }
         }
-        guard auth == "Bearer \(token)" else { respond(fd,401,["error":"Unauthorized"]); return }
+        guard sameToken(auth) else { respond(fd,401,["error":"Unauthorized"]); return }
         guard size >= 0 && size <= 1_048_576 else { respond(fd,413,["error":"Request too large"]); return }
         var data = Data(count: size), received = 0
         while received < size {
@@ -147,10 +167,10 @@ private final class SDKServer {
         let ready = UIApplication.shared.applicationState == .active && !views.isEmpty
         if method == "GET" && path == "/status" {
             let supported = !views.isEmpty && !views.contains(where: hasUnsupportedUI)
-            return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.3.1","platform":"ios",
-                    "revision":"swiftui-actions.1",
+            return ["product":"e2e-studio-inapp-sdk","protocol":1,"version":"0.3.2","platform":"ios",
+                    "revision":"usb-tunnel.1",
                     "appId":Bundle.main.bundleIdentifier ?? "", "ready":ready,
-                    "capabilities":supported ? ["hierarchy","tap","tap-check","type","clear","keyboard-hide"] : []] as [String:Any]
+                    "capabilities":supported ? ["hierarchy","tap","tap-check","type","clear","keyboard-hide"] + (bindAddress == nil ? [] : ["screenshot","swipe"]) : []] as [String:Any]
         }
         if method == "GET" && path == "/diagnostics" {
             return ["fields": views.flatMap { diagnosticFields($0) }]
@@ -165,7 +185,9 @@ private final class SDKServer {
             return ["root":["className":"Application","bounds":bounds(frame),"children":children],
                     "screenSize":["width":Int(frame.width),"height":Int(frame.height)]] as [String:Any]
         }
+        if method == "GET" && path == "/screenshot" && bindAddress != nil { return try screenshot(views) }
         guard method == "POST" else { throw SDKError("Unsupported SDK operation") }
+        if path == "/swipe" && bindAddress != nil { return try scroll(views, body) }
         if path == "/tap-check" {
             // Read-only negotiation: Auto can choose System before any action is dispatched.
             let supported=tapTarget(views, body) != nil || accessibilityTapTarget(views, body) != nil
@@ -202,6 +224,38 @@ private final class SDKServer {
             input.deleteBackward(); return true
         }
         throw SDKError("Unsupported SDK operation")
+    }
+    /// Real devices have no OS driver in SDK mode: this captures the app's own windows, never other apps.
+    @MainActor private func screenshot(_ views: [UIWindow]) throws -> String {
+        let frame = views.first!.screen.bounds
+        let image = UIGraphicsImageRenderer(bounds: frame).image { _ in
+            views.sorted { $0.windowLevel < $1.windowLevel }.forEach { $0.drawHierarchy(in: $0.frame, afterScreenUpdates: false) }
+        }
+        guard let data = image.pngData() else { throw SDKError("Could not capture the app") }
+        return data.base64EncodedString()
+    }
+    /// A public scroll-view offset change. Other gestures stay unsupported instead of being simulated.
+    @MainActor private func scroll(_ views: [UIWindow], _ body: [String:Any]) throws -> Bool {
+        guard let fromX = (body["fromX"] as? NSNumber)?.doubleValue, let fromY = (body["fromY"] as? NSNumber)?.doubleValue,
+              let toX = (body["toX"] as? NSNumber)?.doubleValue, let toY = (body["toY"] as? NSNumber)?.doubleValue,
+              fromX.isFinite, fromY.isFinite, toX.isFinite, toY.isFinite else { throw SDKError("Invalid swipe") }
+        let point = CGPoint(x: fromX, y: fromY)
+        for window in views.sorted(by: { $0.windowLevel > $1.windowLevel }) {
+            guard var current = window.hitTest(window.convert(point, from: nil), with: nil) else { continue }
+            while !(current is UIScrollView && (current as! UIScrollView).isScrollEnabled) {
+                guard let parent = current.superview else { throw SDKError("No scrollable content at this point", code: "UNSUPPORTED_ACTION") }
+                current = parent
+            }
+            let list = current as! UIScrollView
+            let inset = list.adjustedContentInset
+            let maxX = max(-inset.left, list.contentSize.width - list.bounds.width + inset.right)
+            let maxY = max(-inset.top, list.contentSize.height - list.bounds.height + inset.bottom)
+            let x = min(max(list.contentOffset.x + fromX - toX, -inset.left), maxX)
+            let y = min(max(list.contentOffset.y + fromY - toY, -inset.top), maxY)
+            list.setContentOffset(CGPoint(x: x, y: y), animated: false)
+            return true
+        }
+        throw SDKError("No scrollable content at this point", code: "UNSUPPORTED_ACTION")
     }
     /// Resolve only controls whose public activation has known semantics. No private touch injection,
     /// accessibilityActivate guessing, or mutation happens during capability negotiation.
